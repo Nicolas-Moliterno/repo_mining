@@ -110,52 +110,77 @@ REPOS = [
 
 OUTPUT_FILE = "deployment_workflows.csv"
 
-WORKFLOW_INCLUDE = ["publish", "release", "deploy"]
+WORKFLOW_INCLUDE = ["publish", "release", "deploy", "ci-cd", "main", "pypi"]
 
-ACTIONS_PATTERNS = [
+# publishes to PyPI — these are deployment tools
+DEPLOY_ACTIONS = [
     r"pypa/gh-action-pypi-publish[^\s\"']*",
 ]
-
-CLI_PATTERNS = [
+DEPLOY_CLI = [
     r"\btwine upload\b",
     r"\buv publish\b",
 ]
 
-TOOL_MAP = {
-    "uv publish":                    "astral_uv",
-    "twine upload":                  "twine",
-    "pypa/gh-action-pypi-publish":   "pypa",
+# sets up the environment — these are build/setup tools
+SETUP_ACTIONS = [
+    r"astral-sh/setup-uv[^\s\"']*",
+]
+SETUP_CLI = [
+    r"\btox\b",
+]
+
+DEPLOY_TOOL_MAP = {
+    "uv publish":                  "astral_uv",
+    "twine upload":                "twine",
+    "pypa/gh-action-pypi-publish": "pypa",
+}
+
+SETUP_TOOL_MAP = {
+    "astral-sh/setup-uv": "astral_uv (setup)",
+    "tox":                "tox",
 }
 
 
-def normalize(tool: str) -> str:
-    for pattern, label in TOOL_MAP.items():
+def normalize(tool: str, tool_map: dict) -> str:
+    for pattern, label in tool_map.items():
         if tool.startswith(pattern):
             return label
     return tool
 
 
-def extract_tools(content: str) -> list[str]:
-    found = set()
+def extract_tools(content: str) -> tuple[list[str], list[str]]:
+    deploy_found = set()
+    setup_found = set()
 
-    for pattern in ACTIONS_PATTERNS:
+    for pattern in DEPLOY_ACTIONS:
         for match in re.findall(pattern, content):
-            found.add(match.strip())
+            deploy_found.add(match.strip())
+
+    for pattern in SETUP_ACTIONS:
+        for match in re.findall(pattern, content):
+            setup_found.add(match.strip())
 
     run_blocks = re.findall(r"run:\s*\|?([\s\S]*?)(?=\n\s*\w+:|$)", content)
     for block in run_blocks:
-        for pattern in CLI_PATTERNS:
+        for pattern in DEPLOY_CLI:
             match = re.search(pattern, block)
             if match:
-                found.add(match.group().strip())
+                deploy_found.add(match.group().strip())
+        for pattern in SETUP_CLI:
+            match = re.search(pattern, block)
+            if match:
+                setup_found.add(match.group().strip())
 
-    return sorted(normalize(t) for t in found)
+    deploy = sorted(set(normalize(t, DEPLOY_TOOL_MAP) for t in deploy_found))
+    setup  = sorted(set(normalize(t, SETUP_TOOL_MAP) for t in setup_found))
+
+    return deploy, setup
 
 
 def mine_repos(repos: list[str]) -> list[dict]:
     rows = []
-    for idx, repo_url in enumerate(repos):
-        print(f"\n-> Mining: {repo_url} ({idx+1}/{len(repos)})")
+    for repo_url in repos:
+        print(f"\n-> Cloning: {repo_url}")
         with tempfile.TemporaryDirectory() as tmpdir:
             result = subprocess.run(
                 ["git", "clone", "--depth=1", repo_url, tmpdir],
@@ -170,30 +195,37 @@ def mine_repos(repos: list[str]) -> list[dict]:
                 print("  No .github/workflows/ found.")
                 continue
 
-            tools = []
+            matched = []
             for wf_file in sorted(workflow_dir.glob("*.y*ml")):
                 if not any(kw in wf_file.name.lower() for kw in WORKFLOW_INCLUDE):
                     continue
 
                 content = wf_file.read_text(encoding="utf-8", errors="ignore")
-                tools = extract_tools(content)
+                deploy_tools, setup_tools = extract_tools(content)
                 rel = str(wf_file.relative_to(Path(tmpdir)))
 
-                print(f"  {rel} | {tools or '-'}")
+                if deploy_tools or setup_tools:
+                    matched.append((rel, deploy_tools, setup_tools))
+                    print(f"  {rel}")
+                    print(f"    deploy: {deploy_tools or '-'}")
+                    print(f"    setup:  {setup_tools or '-'}")
 
+            if not matched:
                 rows.append({
-                    "repo":          repo_url,
-                    "workflow_file": rel,
-                    "tools":         ", ".join(tools) if tools else "-",
+                    "repo":           repo_url,
+                    "workflow_file":  "-",
+                    "deployment_tool": "-",
+                    "setup_tool":     "-",
                 })
-            
-            if len(tools) == 0:
-                rows.append({
-                    "repo":          repo_url,
-                    "workflow_file": "-",
-                    "tools":         "-",
-                })
-                print(f"  - | - ") 
+                print("  no tools found")
+            else:
+                for rel, deploy_tools, setup_tools in matched:
+                    rows.append({
+                        "repo":            repo_url,
+                        "workflow_file":   rel,
+                        "deployment_tool": ", ".join(deploy_tools) if deploy_tools else "-",
+                        "setup_tool":      ", ".join(setup_tools) if setup_tools else "-",
+                    })
 
     return rows
 
