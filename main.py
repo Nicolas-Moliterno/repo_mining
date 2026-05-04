@@ -1,246 +1,121 @@
+from __future__ import annotations
+
+import argparse
 import csv
-import re
-import subprocess
-import tempfile
 from pathlib import Path
 
-REPOS = [
-    "https://github.com/boto/boto3",
-    "https://github.com/pypa/packaging",
-    "https://github.com/pypa/setuptools",
-    "https://github.com/urllib3/urllib3",
-    "https://github.com/certifi/python-certifi",
-    "https://github.com/python/typing_extensions",
-    "https://github.com/psf/requests",
-    "https://github.com/jawah/charset_normalizer",
-    "https://github.com/kjd/idna",
-    "https://github.com/boto/botocore",
-    "https://github.com/aio-libs/aiobotocore",
-    "https://github.com/dateutil/dateutil",
-    "https://github.com/pyca/cryptography",
-    "https://github.com/benjaminp/six",
-    "https://github.com/numpy/numpy",
-    "https://github.com/python-cffi/cffi",
-    "https://github.com/yaml/pyyaml",
-    "https://github.com/grpc/grpc",
-    "https://github.com/eliben/pycparser",
-    "https://github.com/pydantic/pydantic",
-    "https://github.com/pytest-dev/pluggy",
-    "https://github.com/boto/s3transfer",
-    "https://github.com/pygments/pygments",
-    "https://github.com/pallets/click",
-    "https://github.com/python-attrs/attrs",
-    "https://github.com/protocolbuffers/protobuf",
-    "https://github.com/pydantic/pydantic/tree/main/pydantic-core",
-    "https://github.com/agronholm/anyio",
-    "https://github.com/fsspec/filesystem_spec",
-    "https://github.com/pandas-dev/pandas",
-    "https://github.com/pytest-dev/pytest",
-    "https://github.com/python-hyper/h11",
-    "https://github.com/pallets/markupsafe/",
-    "https://github.com/pytest-dev/iniconfig",
-    "https://github.com/fsspec/s3fs/",
-    "https://github.com/tox-dev/platformdirs",
-    "https://github.com/annotated-types/annotated-types",
-    "https://github.com/pypa/pip",
-    "https://github.com/pypa/wheel",
-    "https://github.com/pallets/jinja/",
-    "https://github.com/jmespath/jmespath.py",
-    "https://github.com/python/importlib_metadata",
-    "https://github.com/tox-dev/filelock",
-    "https://github.com/cpburnz/python-pathspec",
-    "https://github.com/jpadilla/pyjwt",
-    "https://github.com/encode/httpx",
-    "https://github.com/pydantic/typing-inspection",
-    "https://github.com/theskumar/python-dotenv",
-    "https://github.com/encode/httpcore",
-    "https://github.com/stub42/pytz",
-    "https://github.com/jaraco/zipp",
-    "https://github.com/Textualize/rich",
-    "https://github.com/pyasn1/pyasn1",
-    "https://github.com/python-jsonschema/jsonschema",
-    "https://github.com/aio-libs/yarl",
-    "https://github.com/aio-libs/multidict",
-    "https://github.com/aio-libs/aiohttp",
-    "https://github.com/googleapis/google-auth-library-python",
-    "https://github.com/Kludex/uvicorn",
-    "https://github.com/executablebooks/markdown-it-py",
-    "https://github.com/googleapis/google-cloud-python",
-    "https://github.com/python/tzdata",
-    "https://github.com/tqdm/tqdm",
-    "https://github.com/hukkin/tomli",
-    "https://github.com/tartley/colorama",
-    "https://github.com/googleapis/google-cloud-python/tree/main/packages/googleapis-common-protos",
-    "https://github.com/executablebooks/mdurl",
-    "https://github.com/Kludex/starlette",
-    "https://github.com/pypa/virtualenv",
-    "https://github.com/aws/aws-cli",
-    "https://github.com/python-pillow/Pillow",
-    "https://github.com/aio-libs/propcache",
-    "https://github.com/aio-libs/frozenlist",
-    "https://github.com/scipy/scipy",
-    "https://github.com/crate-py/rpds",
-    "https://github.com/pypa/trove-classifiers",
-    "https://github.com/fastapi/fastapi",
-    "https://github.com/sybrenstuvel/python-rsa",
-    "https://github.com/python-jsonschema/referencing",
-    "https://github.com/GrahamDumpleton/wrapt",
-    "https://github.com/pyasn1/pyasn1-modules",
-    "https://github.com/aio-libs/aiosignal",
-    "https://github.com/python-jsonschema/jsonschema-specifications",
-    "https://github.com/python-greenlet/greenlet",
-    "https://github.com/grpc/grpc",
-    "https://github.com/sqlalchemy/sqlalchemy",
-    "https://github.com/requests/requests-oauthlib",
-    "https://github.com/apache/arrow",
-    "https://github.com/pyparsing/pyparsing",
-    "https://github.com/aio-libs/aiohappyeyeballs",
-    "https://github.com/open-telemetry/opentelemetry-python",
-    "https://github.com/jd/tenacity",
-    "https://github.com/fastapi/annotated-doc",
-    "https://github.com/tkem/cachetools/",
-    "https://github.com/mrabarnett/mrab-regex",
-    "https://github.com/giampaolo/psutil",
-    "https://github.com/open-telemetry/opentelemetry-python",
-    "https://github.com/pypa/hatch",
-    "https://github.com/oauthlib/oauthlib",
-    "https://github.com/open-telemetry/opentelemetry-python",
+from extractor import Evidence, Extractor
+from miner import Miner
+from processor import Processor
 
-]
-
-OUTPUT_FILE = "deployment_workflows.csv"
-
-WORKFLOW_INCLUDE = ["publish", "release", "deploy", "ci-cd", "main", "pypi"]
-
-# publishes to PyPI — these are deployment tools
-DEPLOY_ACTIONS = [
-    r"pypa/gh-action-pypi-publish[^\s\"']*",
-]
-DEPLOY_CLI = [
-    r"\btwine upload\b",
-    r"\buv publish\b",
-]
-
-# sets up the environment — these are build/setup tools
-SETUP_ACTIONS = [
-    r"astral-sh/setup-uv[^\s\"']*",
-]
-SETUP_CLI = [
-    r"\btox\b",
-]
-
-DEPLOY_TOOL_MAP = {
-    "uv publish":                  "astral_uv",
-    "twine upload":                "twine",
-    "pypa/gh-action-pypi-publish": "pypa",
-}
-
-SETUP_TOOL_MAP = {
-    "astral-sh/setup-uv": "astral_uv (setup)",
-    "tox":                "tox",
-}
+DEFAULT_OUTPUT_DIR = Path("outputs")
+EVIDENCE_FIELDS = list(Evidence.__dataclass_fields__.keys())
 
 
-def normalize(tool: str, tool_map: dict) -> str:
-    for pattern, label in tool_map.items():
-        if tool.startswith(pattern):
-            return label
-    return tool
+def parse_args() -> argparse.Namespace:
+    """Build and parse the command-line arguments for the mining pipeline."""
+    parser = argparse.ArgumentParser(description="Mine deployment evidence from Python package repositories.")
+    parser.add_argument("repos_csv", help="CSV catalog with repo_name/repo_url columns or compatible aliases.")
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_OUTPUT_DIR),
+        help="Directory where evidence.csv and repo_summary.csv will be written.",
+    )
+    return parser.parse_args()
 
 
-def extract_tools(content: str) -> tuple[list[str], list[str]]:
-    deploy_found = set()
-    setup_found = set()
+def load_repo_records(path: str | Path) -> list[dict[str, str]]:
+    """Load repository metadata from the input catalog."""
+    catalog_path = Path(path)
+    with catalog_path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        rows = []
+        for raw_row in reader:
+            repo_name = raw_row.get("repo_name", "")
+            repo_url = raw_row.get("repo_url", "")
 
-    for pattern in DEPLOY_ACTIONS:
-        for match in re.findall(pattern, content):
-            deploy_found.add(match.strip())
+            if not repo_name or not repo_url:
+                continue
 
-    for pattern in SETUP_ACTIONS:
-        for match in re.findall(pattern, content):
-            setup_found.add(match.strip())
-
-    run_blocks = re.findall(r"run:\s*\|?([\s\S]*?)(?=\n\s*\w+:|$)", content)
-    for block in run_blocks:
-        for pattern in DEPLOY_CLI:
-            match = re.search(pattern, block)
-            if match:
-                deploy_found.add(match.group().strip())
-        for pattern in SETUP_CLI:
-            match = re.search(pattern, block)
-            if match:
-                setup_found.add(match.group().strip())
-
-    deploy = sorted(set(normalize(t, DEPLOY_TOOL_MAP) for t in deploy_found))
-    setup  = sorted(set(normalize(t, SETUP_TOOL_MAP) for t in setup_found))
-
-    return deploy, setup
-
-
-def mine_repos(repos: list[str]) -> list[dict]:
-    rows = []
-    for repo_url in repos:
-        print(f"\n-> Cloning: {repo_url}")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = subprocess.run(
-                ["git", "clone", "--depth=1", repo_url, tmpdir],
-                capture_output=True, text=True
+            rows.append(
+                {
+                    "repo_name": repo_name,
+                    "repo_url": repo_url,
+                    "pypi_rank": raw_row.get("pypi_rank", "") or raw_row.get("repo_rank", ""),
+                }
             )
-            if result.returncode != 0:
-                print(f"  git clone failed:\n{result.stderr.strip()}")
-                continue
-
-            workflow_dir = Path(tmpdir) / ".github" / "workflows"
-            if not workflow_dir.exists():
-                print("  No .github/workflows/ found.")
-                continue
-
-            matched = []
-            for wf_file in sorted(workflow_dir.glob("*.y*ml")):
-                if not any(kw in wf_file.name.lower() for kw in WORKFLOW_INCLUDE):
-                    continue
-
-                content = wf_file.read_text(encoding="utf-8", errors="ignore")
-                deploy_tools, setup_tools = extract_tools(content)
-                rel = str(wf_file.relative_to(Path(tmpdir)))
-
-                if deploy_tools or setup_tools:
-                    matched.append((rel, deploy_tools, setup_tools))
-                    print(f"  {rel}")
-                    print(f"    deploy: {deploy_tools or '-'}")
-                    print(f"    setup:  {setup_tools or '-'}")
-
-            if not matched:
-                rows.append({
-                    "repo":           repo_url,
-                    "workflow_file":  "-",
-                    "deployment_tool": "-",
-                    "setup_tool":     "-",
-                })
-                print("  no tools found")
-            else:
-                for rel, deploy_tools, setup_tools in matched:
-                    rows.append({
-                        "repo":            repo_url,
-                        "workflow_file":   rel,
-                        "deployment_tool": ", ".join(deploy_tools) if deploy_tools else "-",
-                        "setup_tool":      ", ".join(setup_tools) if setup_tools else "-",
-                    })
 
     return rows
 
 
-def save_csv(rows: list[dict], path: str) -> None:
-    if not rows:
-        print("Nothing found.")
-        return
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"\n✓ Saved {len(rows)} rows -> {path}")
+def process_records(
+    repo_records: list[dict[str, str]],
+    miner: Miner,
+    extractor: Extractor,
+    processor: Processor,
+    output_dir: str | Path,
+) -> dict[str, Path]:
+    """Run extraction and aggregation for every repository and write the output CSV files."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    data_rows: list[Evidence] = []
+
+    for record in repo_records:
+        repo_name = record["repo_name"]
+        repo_url = record["repo_url"]
+        print(f"\n-> Processing: {repo_name} ({repo_url})")
+        repo_root = miner.download_repo(repo_url)
+        if repo_root is None:
+            print("  unable to access repository")
+            continue
+
+        try:
+            repo_data = extractor.extract_repository(repo_name, repo_root)
+            data_rows.extend(repo_data)
+            print(f"  collected {len(repo_data)} data rows")
+        finally:
+            miner.cleanup_repo(repo_root)
+
+    evidence_dict_rows = [item.as_dict() for item in data_rows]
+    summary_rows = processor.summarize_repositories(repo_records, data_rows)
+
+    evidence_csv = output_path / "evidence.csv"
+    summary_csv = output_path / "repo_summary.csv"
+
+    processor.write_csv(evidence_dict_rows, evidence_csv, EVIDENCE_FIELDS)
+    processor.write_csv(summary_rows, summary_csv, Processor.SUMMARY_FIELDS)
+
+    generated = {
+        "evidence": evidence_csv,
+        "summary": summary_csv,
+    }
+    return generated
+
+
+def main() -> None:
+    """Execute the repository mining pipeline from the command line."""
+    args = parse_args()
+    repo_records = load_repo_records(args.repos_csv)
+
+    if not repo_records:
+        raise SystemExit("No repositories found in the input CSV.")
+
+    miner = Miner()
+    extractor = Extractor()
+    processor = Processor()
+    generated = process_records(
+        repo_records=repo_records,
+        miner=miner,
+        extractor=extractor,
+        processor=processor,
+        output_dir=args.output_dir,
+    )
+
+    print("\nGenerated files:")
+    for name, path in generated.items():
+        print(f"  {name}: {path}")
 
 
 if __name__ == "__main__":
-    results = mine_repos(REPOS)
-    save_csv(results, OUTPUT_FILE)
+    main()
