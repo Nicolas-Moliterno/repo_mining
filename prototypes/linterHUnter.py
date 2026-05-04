@@ -1,6 +1,8 @@
+import time
 from github_utils import REPOSITORIOS, get_workflows
 
 LINTERS = ["flake8", "black", "ruff", "isort", "mypy", "pylint"]
+MSG_NOT_FOUND = "  ❌ NO -> Nenhuma ferramenta padrão encontrada nos workflows."
 
 print("Iniciando varredura por linters nos workflows...\n" + "-" * 50)
 
@@ -17,8 +19,8 @@ for repo in REPOSITORIOS:
     if encontrados:
         print(f"  ✅ YES (CI automated) -> Ferramentas: {', '.join(encontrados)}")
     else:
-        print(f"  ❌ NO -> Nenhuma ferramenta padrão encontrada nos workflows.")
+        print(MSG_NOT_FOUND)
 
-    import time; time.sleep(1)
+    time.sleep(1)
 
 print("\n" + "-" * 50 + "\nVarredura concluída!")
