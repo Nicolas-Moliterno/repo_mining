@@ -1,4 +1,3 @@
-from __future__ import annotations
 from dataclasses import dataclass
 
 TASK_VERSION_CONTROL = "version_control_system"
